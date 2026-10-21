@@ -1,0 +1,8 @@
+torch
+streamlit
+pymupdf
+sentence-transformers
+numpy
+pydantic
+openai
+python-dotenv
