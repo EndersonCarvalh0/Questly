@@ -41,6 +41,7 @@ PING = "Responda apenas com a palavra: ok"
 
 # Ordem de preferência: os melhores para gerar questões em PT-BR primeiro.
 PRIORITARIOS = [
+    "nvidia/nemotron-3-ultra-550b-a55b",
     "nvidia/llama-3.1-nemotron-70b-instruct",
     "nvidia/llama-3.1-nemotron-51b-instruct",
     "mistralai/mistral-large-2-instruct",

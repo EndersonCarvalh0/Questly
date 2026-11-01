@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import random
 
 from pydantic import ValidationError
 
@@ -25,8 +26,23 @@ def _gerar_uma(
     temperatura: float,
     evita: list[str],
     modelo: str | None = None,
+    feedback: str | None = None,
 ) -> tuple[Questao | None, str]:
     mensagens = PROMPTS[versao](contexto, evita)
+    if feedback:
+        mensagens.append(
+            {
+                "role": "user",
+                "content": (
+                    "CORRIJA A RESPOSTA ANTERIOR. Ela foi rejeitada por este motivo: "
+                    f"{feedback}. Gere novamente um único objeto JSON válido com "
+                    "todos os campos obrigatórios: enunciado, alternativas (4), "
+                    "correta (índice 0 a 3), justificativa, evidencia e pagina. "
+                    "A evidencia deve ser uma sequência de palavras copiada do material, "
+                    "sem reticências nem paráfrase. Responda somente com o JSON."
+                ),
+            }
+        )
     try:
         bruto = chat(mensagens, temperature=temperatura, modelo=modelo)
     except Exception as e:
@@ -53,19 +69,36 @@ def gerar_questoes(
     contexto = montar_contexto(trechos)
     res = Resultado()
     evita: list[str] = []
+    # Distribui a posição correta de forma equilibrada no simulado. O LLM
+    # costuma favorecer uma posição; embaralhamos após validar a questão para
+    # evitar que esse viés apareça no gabarito apresentado ao usuário.
+    posicoes_corretas = list(range(4)) * ((n + 3) // 4)
+    random.shuffle(posicoes_corretas)
 
     for i in range(n):
         if progresso:
             progresso(i, n)
         questao = None
+        feedback = None
         for t in range(tentativas):
-            questao, motivo = _gerar_uma(contexto, versao, temperatura, evita, modelo)
+            questao, motivo = _gerar_uma(
+                contexto, versao, temperatura, evita, modelo, feedback
+            )
             if t == 0:
                 res.usages.append(dict(chat.ultimo_usage))
             res.logs.append(f"Q{i+1} tentativa {t+1}: {motivo}")
             if questao:
                 break
+            feedback = motivo
         if questao:
+            posicao_correta = posicoes_corretas[i]
+            alternativas = questao.alternativas.copy()
+            resposta_correta = alternativas.pop(questao.correta)
+            random.shuffle(alternativas)
+            alternativas.insert(posicao_correta, resposta_correta)
+            questao = questao.model_copy(
+                update={"alternativas": alternativas, "correta": posicao_correta}
+            )
             res.questoes.append(questao)
             evita.append(questao.enunciado)
         else:
