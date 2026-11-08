@@ -26,3 +26,15 @@ def evidencia_no_contexto(questao: Questao, contexto: str) -> bool:
     if len(ev) < 10:
         return False
     return ev in ctx
+
+
+def pagina_da_evidencia(evidencia: str, trechos) -> int | None:
+    """Descobre a página real do trecho recuperado que contém a evidência."""
+    ev = normalizar(evidencia)
+    if len(ev) < 10:
+        return None
+    for t in trechos:
+        if ev in normalizar(t.texto):
+            paginas = getattr(t, "paginas", None) or []
+            return paginas[0] if paginas else None
+    return None

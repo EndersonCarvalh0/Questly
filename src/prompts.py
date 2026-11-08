@@ -20,7 +20,8 @@ FORMATO = {
 def montar_contexto(trechos: list[Chunk]) -> str:
     blocos = []
     for c in trechos:
-        blocos.append(f"[página {c.paginas[0]}]\n{c.texto}")
+        pagina = c.paginas[0] if c.paginas else "?"
+        blocos.append(f"[página {pagina}]\n{c.texto}")
     return "\n\n".join(blocos)
 
 
@@ -71,25 +72,4 @@ def prompt_v2(contexto: str, evita: list[str] | None = None) -> list[dict]:
     return [
         {"role": "system", "content": SISTEMA},
         {"role": "user", "content": user},
-    ]
-
-
-# NÃO USADO ainda: reservado para a fase do avaliador completo (juiz LLM).
-# Mantido aqui, mas fora do fluxo atual da fatia vertical.
-def prompt_juiz(questao_json: dict) -> list[dict]:
-    return [
-        {"role": "system", "content": SISTEMA},
-        {
-            "role": "user",
-            "content": (
-                "Avalie a qualidade desta questão de múltipla escolha.\n\n"
-                f"QUESTÃO:\n{json.dumps(questao_json, ensure_ascii=False)}\n\n"
-                "Dê notas de 1 a 5 para:\n"
-                "- clareza: o enunciado é claro e sem ambiguidade\n"
-                "- fundamentacao: a justificativa sustenta o gabarito\n"
-                "- coerencia: o gabarito bate com a justificativa\n\n"
-                "Responda SOMENTE com JSON: "
-                '{"clareza": int, "fundamentacao": int, "coerencia": int, "nota": int}'
-            ),
-        },
     ]
