@@ -40,20 +40,22 @@ EXCLUIR = (
 PING = "Responda apenas com a palavra: ok"
 
 # Ordem de preferência: os melhores para gerar questões em PT-BR primeiro.
+# Confirmados em nov/2026: nemotron-3-ultra, nemotron-3.5-lightning, step-5.
+# Offline/410: gpt-oss-20b, deepseek-v4.1-flash, glm-5.3, glm-5.3-flash.
 PRIORITARIOS = [
     "nvidia/nemotron-3-ultra-550b-a55b",
+    "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "stepfun-ai/step-5-preview",
     "nvidia/llama-3.1-nemotron-70b-instruct",
     "nvidia/llama-3.1-nemotron-51b-instruct",
     "mistralai/mistral-large-2-instruct",
     "mistralai/mistral-large",
-    "openai/gpt-oss-20b",
     "nvidia/nemotron-3-super-120b-a12b",
-    "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "moonshotai/kimi-k2.6",
+    "openai/gpt-oss-20b",
     "z-ai/glm-5.3",
     "z-ai/glm-5.3-flash",
-    "moonshotai/kimi-k2.6",
     "deepseek-ai/deepseek-v4.1-flash",
-    "stepfun-ai/step-5-preview",
 ]
 
 

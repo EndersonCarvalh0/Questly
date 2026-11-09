@@ -23,12 +23,11 @@ st.set_page_config(page_title="QuestIA", page_icon="📄", layout="wide")
 # inteiro, mas alguns dão 404). O usuário também pode carregar o catálogo.
 MODELOS_CONHECIDOS = [
     "nvidia/nemotron-3-ultra-550b-a55b",
-    "openai/gpt-oss-20b",
-    "z-ai/glm-5.3",
-    "z-ai/glm-5.3-flash",
     "nvidia/nemotron-3.5-lightning-30b-a3b",
-    "deepseek-ai/deepseek-v4.1-flash",
     "stepfun-ai/step-5-preview",
+    "nvidia/nemotron-3.5-bolt-e4b",
+    "mistralai/mistral-large-4-1t-a52b",
+    "minimaxai/minimax-m3.1-flash",
 ]
 MODELOS_OLLAMA = ["qwen2.5:3b", "qwen2.5:7b", "llama3.2:3b"]
 STATUS_TESTE = {
