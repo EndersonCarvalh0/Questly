@@ -19,6 +19,7 @@ class Simulado:
     logs: list[str] = field(default_factory=list)
     descartadas: int = 0
     n_paginas: int = 0
+    paginas_filtro: tuple[int, int] | None = None
     provedor: str | None = None
     modelo: str = ""
     cancelado: bool = False
@@ -35,6 +36,16 @@ def _avisar(etapa, mensagem: str) -> None:
         etapa(mensagem)
 
 
+def filtrar_chunks_por_paginas(
+    chunks: list[Chunk], pagina_inicio: int, pagina_fim: int
+) -> list[Chunk]:
+    return [
+        chunk
+        for chunk in chunks
+        if any(pagina_inicio <= p <= pagina_fim for p in chunk.paginas)
+    ]
+
+
 def gerar_simulado(
     fonte,
     n: int,
@@ -48,6 +59,8 @@ def gerar_simulado(
     max_tokens: int = 250,
     sobreposicao: int = 40,
     top_k: int = 5,
+    pagina_inicio: int | None = None,
+    pagina_fim: int | None = None,
     cancelar: Event | None = None,
 ) -> Simulado:
     """Executa o fluxo completo: PDF -> chunks -> embeddings -> RAG -> questões."""
@@ -59,18 +72,43 @@ def gerar_simulado(
     validar_texto(paginas)
     _avisar(etapa, f"{len(paginas)} páginas lidas")
 
+    total_paginas = len(paginas)
+    filtro_ativo = pagina_inicio is not None or pagina_fim is not None
+    primeiro = 1 if pagina_inicio is None else int(pagina_inicio)
+    ultimo = total_paginas if pagina_fim is None else int(pagina_fim)
+    if not 1 <= primeiro <= ultimo <= total_paginas:
+        raise ValueError(
+            f"Intervalo de páginas inválido: {primeiro}-{ultimo}. "
+            f"O PDF tem {total_paginas} páginas."
+        )
+
     _avisar(etapa, "Gerando embeddings e recuperando trechos...")
     model = get_model(MODELO_PADRAO)
     chunks, avisos = chunk_por_paginas(paginas, max_tokens, sobreposicao)
     if not chunks:
         raise ValueError("Nenhum texto aproveitável foi extraído do PDF.")
 
+    if filtro_ativo:
+        _avisar(etapa, f"Filtrando páginas {primeiro}-{ultimo}...")
+        chunks = filtrar_chunks_por_paginas(chunks, primeiro, ultimo)
+        if not chunks:
+            raise ValueError(
+                f"Nenhum texto aproveitável nas páginas {primeiro}-{ultimo}."
+            )
+
     indice = Indice(model, chunks)
     if tema.strip():
         trechos = indice.buscar(tema, top_k=min(top_k, len(chunks)))
     else:
         trechos = indice.mais_central()[: min(top_k, len(chunks))]
-    _avisar(etapa, f"{len(chunks)} chunks, {len(trechos)} trechos usados")
+    if filtro_ativo:
+        _avisar(
+            etapa,
+            f"{len(chunks)} chunks nas páginas {primeiro}-{ultimo}, "
+            f"{len(trechos)} trechos usados",
+        )
+    else:
+        _avisar(etapa, f"{len(chunks)} chunks, {len(trechos)} trechos usados")
 
     _avisar(etapa, "Gerando e validando questões...")
     res = gerar_questoes(
@@ -92,6 +130,7 @@ def gerar_simulado(
         logs=res.logs,
         descartadas=res.descartadas,
         n_paginas=len(paginas),
+        paginas_filtro=(primeiro, ultimo) if filtro_ativo else None,
         provedor=provedor,
         modelo=modelo_uso,
         cancelado=res.cancelado,

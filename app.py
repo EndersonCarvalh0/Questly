@@ -7,6 +7,7 @@ import time
 import streamlit as st
 
 from src.chunking import MODELO_PADRAO, contar_tokens, get_model
+from src.ingest import contar_paginas
 from src.llm import (
     get_client,
     get_modelo,
@@ -52,6 +53,11 @@ def init_state():
         "provedor_usado": None,
         "n_paginas": 0,
         "n_chunks": 0,
+        "paginas_filtro": None,
+        "pdf_id": 0,
+        "pdf_assinatura": None,
+        "pdf_total_paginas": 0,
+        "pdf_erro": None,
         "geracao_id": 0,
         "geracao": None,
         "duracao": None,
@@ -75,6 +81,7 @@ def limpar_geracao():
     st.session_state.provedor_usado = None
     st.session_state.n_paginas = 0
     st.session_state.n_chunks = 0
+    st.session_state.paginas_filtro = None
     st.session_state.geracao = None
     st.session_state.duracao = None
     st.session_state.cancelado = False
@@ -111,6 +118,81 @@ def modelos_do_provedor(provedor: str) -> list[str]:
     if provedor == "ollama":
         return MODELOS_OLLAMA
     return ids_modelos(provedor)
+
+
+def _preparar_pdf(arquivo) -> tuple[int, str | None]:
+    if arquivo is None:
+        st.session_state.pdf_assinatura = None
+        st.session_state.pdf_total_paginas = 0
+        st.session_state.pdf_erro = None
+        return 0, None
+
+    assinatura = (
+        getattr(arquivo, "name", ""),
+        getattr(arquivo, "size", 0),
+        getattr(arquivo, "file_id", None),
+    )
+    if st.session_state.get("pdf_assinatura") == assinatura:
+        return (
+            st.session_state.get("pdf_total_paginas", 0),
+            st.session_state.get("pdf_erro"),
+        )
+
+    st.session_state.pdf_id += 1
+    st.session_state.pdf_assinatura = assinatura
+    try:
+        dados = arquivo.getvalue()
+        total = contar_paginas(dados)
+        erro = None
+    except Exception as e:
+        total = 0
+        erro = f"Não consegui ler o PDF: {e}"
+    st.session_state.pdf_total_paginas = total
+    st.session_state.pdf_erro = erro
+    return total, erro
+
+
+def _controles_filtro(
+    total_paginas: int,
+    pdf_id: int,
+) -> tuple[int | None, int | None, bool, bool]:
+    with st.expander("Filtrar páginas (opcional)"):
+        st.caption(
+            "Sem filtro, o PDF inteiro é usado. O campo Assunto não restringe "
+            "páginas; ele apenas direciona a busca dentro do material."
+        )
+        ativo = st.checkbox(
+            "Restringir a um intervalo de páginas",
+            value=False,
+            key=f"filtro_ativo_{pdf_id}",
+        )
+        if not ativo:
+            st.caption(f"Sem filtro: {total_paginas} páginas serão usadas.")
+            return None, None, False, True
+
+        col_inicio, col_fim = st.columns(2)
+        inicio = col_inicio.number_input(
+            "Página inicial",
+            min_value=1,
+            max_value=total_paginas,
+            value=1,
+            key=f"filtro_inicio_{pdf_id}",
+        )
+        fim = col_fim.number_input(
+            "Página final",
+            min_value=1,
+            max_value=total_paginas,
+            value=total_paginas,
+            key=f"filtro_fim_{pdf_id}",
+        )
+        if fim < inicio:
+            st.error("A página final deve ser maior ou igual à inicial.")
+            return int(inicio), int(fim), True, False
+        st.caption(
+            f"Serão usadas as páginas {int(inicio)}–{int(fim)} "
+            f"de {total_paginas}."
+        )
+        return int(inicio), int(fim), True, True
 
 
 def rotulo_provedor(provedor: str) -> str:
@@ -154,6 +236,9 @@ def estado_tentativa(checks: list) -> str:
 def markdown_simulado() -> str:
     questoes = st.session_state.questoes
     linhas = ["# Simulado QuestIA", "", resumo_geracao(), ""]
+    filtro = st.session_state.get("paginas_filtro")
+    if filtro:
+        linhas.extend([f"**Material filtrado:** páginas {filtro[0]}–{filtro[1]}", ""])
     for i, q in enumerate(questoes):
         linhas.append(f"**{i + 1}. {q.enunciado}**")
         linhas.append("")
@@ -180,6 +265,9 @@ def exportar_simulado():
         "modelo": st.session_state.get("modelo_usado"),
         "questoes": [q.model_dump() for q in questoes],
     }
+    filtro = st.session_state.get("paginas_filtro")
+    if filtro:
+        dados["paginas_filtro"] = list(filtro)
     col_json, col_md = st.columns(2)
     col_json.download_button(
         "Baixar JSON",
@@ -203,6 +291,12 @@ def render_questoes():
     questoes = st.session_state.questoes
     st.subheader(f"Simulado ({len(questoes)} questões)")
     st.caption(resumo_geracao())
+    filtro = st.session_state.get("paginas_filtro")
+    if filtro:
+        st.caption(
+            f"Material filtrado: páginas {filtro[0]}–{filtro[1]} "
+            f"de {st.session_state.get('n_paginas', 0)}."
+        )
     for i, q in enumerate(questoes):
         st.markdown(f"**{i + 1}. {q.enunciado}**")
         opcoes = [f"{'ABCD'[j]}) {alt}" for j, alt in enumerate(q.alternativas)]
@@ -246,6 +340,7 @@ def _finalizar_geracao(sim):
     st.session_state.logs = sim.logs
     st.session_state.n_paginas = sim.n_paginas
     st.session_state.n_chunks = sim.n_chunks
+    st.session_state.paginas_filtro = sim.paginas_filtro
     st.session_state.modelo_usado = sim.modelo
     st.session_state.provedor_usado = sim.provedor
     st.session_state.duracao = sim.duracao
@@ -267,7 +362,16 @@ def _finalizar_erro(mensagem: str, duracao: float):
     st.session_state.geracao = None
 
 
-def _worker_geracao(job, arquivo_bytes, n, tema, modelo, provedor):
+def _worker_geracao(
+    job,
+    arquivo_bytes,
+    n,
+    tema,
+    modelo,
+    provedor,
+    pagina_inicio=None,
+    pagina_fim=None,
+):
     fila = job["fila"]
     cancelar = job["cancelar"]
     inicio = time.perf_counter()
@@ -278,6 +382,8 @@ def _worker_geracao(job, arquivo_bytes, n, tema, modelo, provedor):
             tema=tema,
             modelo=modelo,
             provedor=provedor,
+            pagina_inicio=pagina_inicio,
+            pagina_fim=pagina_fim,
             progresso=lambda i, total: fila.put(("progresso", i, total)),
             etapa=lambda mensagem: fila.put(("etapa", mensagem)),
             cancelar=cancelar,
@@ -328,6 +434,19 @@ def _painel_geracao():
 
 def aba_simulado():
     arquivo = st.file_uploader("Envie um PDF de aula (texto selecionável)", type="pdf")
+    total_paginas, erro_pdf = _preparar_pdf(arquivo)
+    if erro_pdf:
+        st.error(erro_pdf)
+
+    pagina_inicio = None
+    pagina_fim = None
+    filtro_ativo = False
+    filtro_valido = True
+    if arquivo is not None and not erro_pdf:
+        pagina_inicio, pagina_fim, filtro_ativo, filtro_valido = _controles_filtro(
+            total_paginas, st.session_state.pdf_id
+        )
+
     tema = st.text_input("Assunto (opcional)", placeholder="ex.: fotossíntese")
 
     provedores = provedores_para_ui()
@@ -421,7 +540,13 @@ def aba_simulado():
     gerar = col2.button(
         "Gerar questões",
         type="primary",
-        disabled=arquivo is None or erro_conexao is not None or gerando,
+        disabled=(
+            arquivo is None
+            or erro_pdf is not None
+            or erro_conexao is not None
+            or gerando
+            or not filtro_valido
+        ),
     )
 
     if gerar and arquivo is not None:
@@ -437,7 +562,16 @@ def aba_simulado():
         st.session_state.geracao = job
         threading.Thread(
             target=_worker_geracao,
-            args=(job, arquivo.getvalue(), int(n), tema, modelo, provedor),
+            args=(
+                job,
+                arquivo.getvalue(),
+                int(n),
+                tema,
+                modelo,
+                provedor,
+                pagina_inicio if filtro_ativo else None,
+                pagina_fim if filtro_ativo else None,
+            ),
             daemon=True,
         ).start()
         st.rerun(scope="app")
@@ -468,6 +602,9 @@ def aba_simulado():
 def aba_como_funcionou():
     if st.session_state.get("modelo_usado"):
         st.caption(resumo_geracao())
+    filtro = st.session_state.get("paginas_filtro")
+    if filtro:
+        st.caption(f"Filtro aplicado: páginas {filtro[0]}–{filtro[1]}.")
     duracao = st.session_state.get("duracao")
     if duracao is not None and st.session_state.get("modelo_usado"):
         if st.session_state.get("cancelado"):
@@ -561,15 +698,20 @@ def aba_fundamentos():
     n_chunks = st.session_state.get("n_chunks", 0)
     trechos = st.session_state.get("trechos", [])
     if n_paginas:
+        filtro = st.session_state.get("paginas_filtro")
+        recorte = (
+            f" (filtro: páginas {filtro[0]}–{filtro[1]})" if filtro else ""
+        )
         st.caption(
-            f"Último processamento: {n_paginas} páginas, {n_chunks} chunks, "
+            f"Último processamento: {n_paginas} páginas{recorte}, {n_chunks} chunks, "
             f"{len(trechos)} trechos recuperados."
         )
 
     st.markdown(
         "**1. Tokenização.** O PDF é extraído página a página, dividido em "
         "frases e contado em tokens pelo tokenizer do modelo de embeddings. "
-        "Cada chunk respeita o limite de 512 tokens do `e5-small`."
+        "Cada chunk usa até 250 tokens por padrão, abaixo do limite de 512 do "
+        "`e5-small`."
     )
     st.markdown(
         "**2. Embeddings.** Cada chunk vira um vetor com o modelo local "

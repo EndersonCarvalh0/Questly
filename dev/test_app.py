@@ -126,11 +126,42 @@ def testar_toggle_catalogo() -> None:
     print("[OK] catálogo alterna entre completo e modelos conhecidos")
 
 
+def testar_filtro_de_paginas_na_ui() -> None:
+    pdf = RAIZ / "eval" / "pdfs" / "Aula01_ConceitosBasicos.pdf"
+    at = _app()
+    at.run(timeout=60)
+    assert not at.exception, at.exception
+    at.file_uploader[0].set_value(
+        (pdf.name, pdf.read_bytes(), "application/pdf")
+    )
+    at.run(timeout=60)
+    assert not at.exception, at.exception
+    filtro = next(
+        c
+        for c in at.checkbox
+        if c.label == "Restringir a um intervalo de páginas"
+    )
+    assert filtro.value is False
+    filtro.set_value(True).run(timeout=60)
+    assert not at.exception, at.exception
+    inicio = next(n for n in at.number_input if n.label == "Página inicial")
+    fim = next(n for n in at.number_input if n.label == "Página final")
+    inicio.set_value(3).run(timeout=60)
+    fim.set_value(5).run(timeout=60)
+    assert not at.exception, at.exception
+    assert any("páginas 3–5" in c.value for c in at.caption)
+    inicio.set_value(8).run(timeout=60)
+    fim.set_value(4).run(timeout=60)
+    assert any("maior ou igual" in e.value for e in at.error)
+    print("[OK] filtro opcional de páginas na interface")
+
+
 def main() -> None:
     testar_render_inicial()
     testar_finalizacao_via_fila()
     testar_botao_parar()
     testar_toggle_catalogo()
+    testar_filtro_de_paginas_na_ui()
 
 
 if __name__ == "__main__":

@@ -14,15 +14,29 @@ def limpar(texto: str) -> str:
     return texto.strip()
 
 
+def _abrir(fonte):
+    if isinstance(fonte, (bytes, bytearray)):
+        return pymupdf.open(stream=fonte, filetype="pdf")
+    return pymupdf.open(fonte)
+
+
+def contar_paginas(fonte) -> int:
+    """Devolve o total de páginas do PDF, sem extrair o texto."""
+    doc = _abrir(fonte)
+    try:
+        if doc.page_count == 0:
+            raise ValueError("O PDF não tem páginas.")
+        return doc.page_count
+    finally:
+        doc.close()
+
+
 def extrair_paginas(fonte) -> list[str]:
     """Devolve o texto limpo de cada página (índice 0 = página 1).
 
     `fonte` pode ser um caminho ou um bytes/bytearray com o conteúdo do PDF.
     """
-    if isinstance(fonte, (bytes, bytearray)):
-        doc = pymupdf.open(stream=fonte, filetype="pdf")
-    else:
-        doc = pymupdf.open(fonte)
+    doc = _abrir(fonte)
     try:
         if doc.page_count == 0:
             raise ValueError("O PDF não tem páginas.")
